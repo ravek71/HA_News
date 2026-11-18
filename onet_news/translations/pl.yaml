@@ -1,0 +1,10 @@
+configuration:
+  interval_minutes:
+    name: "Odświeżanie (minuty)"
+    description: "Jak często pobierać nowe wiadomości (co N minut)."
+  max_articles:
+    name: "Maks. liczba artykułów"
+    description: "Ile artykułów app trzyma w pamięci i zwraca przez API."
+  log_level:
+    name: "Poziom logów"
+    description: "Szczegółowość logów aplikacji."
