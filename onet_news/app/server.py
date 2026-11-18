@@ -79,18 +79,179 @@ PAGE = """<!doctype html>
 </html>
 """
 
+BREAKING_PAGE = """<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Onet — pilne</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+         margin: 0; padding: 1rem; line-height: 1.45; background: transparent; }
+  header { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; }
+  h1 { font-size: 1.1rem; margin: 0; }
+  .dot { width: .6rem; height: .6rem; border-radius: 50%; background: #f44336;
+         box-shadow: 0 0 0 0 #f44336; animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 #f4433680; }
+    70% { box-shadow: 0 0 0 .5rem #f4433600; }
+    100% { box-shadow: 0 0 0 0 #f4433600; }
+  }
+  .meta { opacity: .7; font-size: .8rem; }
+  ul { list-style: none; padding: 0; margin: 0; }
+  li { margin: 0 0 .8rem; padding-left: .9rem; position: relative; }
+  li::before { content: ""; position: absolute; left: 0; top: .5rem;
+               width: .35rem; height: .35rem; border-radius: 50%; background: #f44336; }
+  a { color: inherit; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .time { font-variant-numeric: tabular-nums; opacity: .7; margin-right: .4rem; }
+  .cat { opacity: .55; font-size: .72rem; margin-left: .4rem; }
+  .tag { font-size: .68rem; padding: .05rem .4rem; border-radius: .8rem; margin-left: .35rem;
+         border: 1px solid #8884; opacity: .8; vertical-align: middle; }
+  .tag.premium { border-color: #c9a227; color: #c9a227; opacity: 1; }
+  .empty { opacity: .65; font-style: italic; margin: 2rem 0; text-align: center; }
+  .filters { display: flex; gap: .5rem; align-items: center; margin: .4rem 0 .7rem; flex-wrap: wrap; }
+  #q { flex: 1 1 14rem; min-width: 10rem; padding: .35rem .6rem; font-size: .85rem;
+       border: 1px solid #8884; border-radius: .5rem; background: #8881; color: inherit; }
+  #q:focus { outline: none; border-color: #f44336; }
+  .chips { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .chip { padding: .25rem .6rem; font-size: .78rem; border-radius: 1rem; cursor: pointer;
+          border: 1px solid #8884; background: transparent; color: inherit; }
+  .chip.active { background: #f44336; border-color: #f44336; color: #fff; }
+  .chip .n { opacity: .65; font-size: .72rem; margin-left: .2rem; }
+</style>
+</head>
+<body>
+  <header>
+    <span class="dot"></span>
+    <h1>Pilne — Onet</h1>
+    <span class="meta" id="meta">@@COUNT@@ wiadomości</span>
+    <span class="meta" id="stamp">odświeżono: @@SCRAPED_AT@@</span>
+  </header>
+  <div class="filters">
+    <input id="q" type="search" placeholder="Szukaj w tytułach…" autocomplete="off">
+    <div class="chips" id="chips"></div>
+  </div>
+  <ul id="list">
+@@BODY@@
+  </ul>
+  <p class="empty" id="empty" style="display:@@EMPTY_STYLE@@">Brak wiadomości pilnych.</p>
+<script>
+(function () {
+  var list = document.getElementById('list');
+  var meta = document.getElementById('meta');
+  var chips = document.getElementById('chips');
+  var q = document.getElementById('q');
+  var empty = document.getElementById('empty');
+  var stamp = document.getElementById('stamp');
+  var activeCat = '';
+  var term = '';
+
+  function norm(s) {
+    return s.toLowerCase()
+      .replace(/ą/g, 'a').replace(/ć/g, 'c').replace(/ę/g, 'e')
+      .replace(/ł/g, 'l').replace(/ń/g, 'n').replace(/ó/g, 'o')
+      .replace(/ś/g, 's').replace(/ź/g, 'z').replace(/ż/g, 'z');
+  }
+  function lis() { return Array.prototype.slice.call(list.children); }
+  function catOf(li) {
+    var c = li.querySelector('.cat');
+    return c ? c.textContent.trim() : '';
+  }
+  function titleOf(li) {
+    var a = li.querySelector('a');
+    return a ? a.textContent.trim() : '';
+  }
+
+  function renderChips() {
+    var counts = {};
+    lis().forEach(function (li) {
+      var c = catOf(li);
+      if (c) counts[c] = (counts[c] || 0) + 1;
+    });
+    chips.textContent = '';
+    function chip(label, cat, count) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'chip' + (activeCat === cat ? ' active' : '');
+      b.textContent = label;
+      if (count != null) {
+        var n = document.createElement('span');
+        n.className = 'n';
+        n.textContent = count;
+        b.appendChild(n);
+      }
+      b.addEventListener('click', function () {
+        activeCat = (activeCat === cat) ? '' : cat;
+        renderChips();
+        apply();
+      });
+      chips.appendChild(b);
+    }
+    chip('Wszystkie', '', null);
+    Object.keys(counts).sort().forEach(function (c) { chip(c, c, counts[c]); });
+  }
+
+  function apply() {
+    var shown = 0;
+    var total = lis().length;
+    lis().forEach(function (li) {
+      var ok = (activeCat === '' || catOf(li) === activeCat) &&
+               (term === '' || norm(titleOf(li)).indexOf(term) !== -1);
+      li.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    meta.textContent = shown + ' / ' + total + ' · odśw. co 60 s';
+    empty.style.display = shown === 0 ? '' : 'none';
+    empty.textContent = total === 0
+      ? 'Brak wiadomości pilnych.'
+      : 'Brak wyników dla wybranego filtra.';
+  }
+
+  q.addEventListener('input', function () {
+    term = norm(q.value.trim());
+    apply();
+  });
+
+  function load() {
+    fetch(location.pathname, { headers: { 'Accept': 'text/html' } })
+      .then(function (r) { return r.ok ? r.text() : null; })
+      .then(function (text) {
+        if (!text) return;
+        var doc = new DOMParser().parseFromString(text, 'text/html');
+        var nl = doc.getElementById('list');
+        if (!nl) return;
+        while (list.firstChild) list.removeChild(list.firstChild);
+        while (nl.firstChild) list.appendChild(nl.firstChild);
+        var ns = doc.getElementById('stamp');
+        if (ns) stamp.textContent = ns.textContent;
+        renderChips();
+        apply();
+      })
+      .catch(function () {});
+  }
+  setInterval(load, 60000);
+  renderChips();
+  apply();
+})();
+</script>
+</body>
+</html>
+"""
+
 
 def _esc(value) -> str:
     return html.escape(str(value), quote=True) if value is not None else ""
 
 
-def _article_li(article: dict, show_time: bool = True) -> str:
+def _article_li(article: dict, show_time: bool = True, show_breaking_tag: bool = True) -> str:
     title = _esc(article.get("title"))
     url = _esc(article.get("url"))
     parts = [f'<li><a href="{url}" target="_blank" rel="noopener">{title}']
     if article.get("is_premium"):
         parts.append('<span class="tag premium">premium</span>')
-    if article.get("breaking"):
+    if show_breaking_tag and article.get("breaking"):
         parts.append('<span class="tag">pilne</span>')
     parts.append("</a>")
     if show_time and article.get("published"):
@@ -155,6 +316,19 @@ def render_page(snap: dict) -> str:
     return page
 
 
+def render_breaking(snap: dict) -> str:
+    breaking = snap.get("breaking") or []
+    # on this page every item is breaking, so the "pilne" tag is redundant
+    items = "".join(_article_li(a, show_breaking_tag=False) for a in breaking)
+    scraped_at = snap.get("scraped_at") or "—"
+    page = BREAKING_PAGE
+    page = page.replace("@@COUNT@@", str(len(breaking)))
+    page = page.replace("@@SCRAPED_AT@@", _esc(scraped_at))
+    page = page.replace("@@BODY@@", items)
+    page = page.replace("@@EMPTY_STYLE@@", "" if not breaking else "none")
+    return page
+
+
 def make_app(store: Store, on_refresh: Optional[Callable[[], None]] = None) -> Flask:
     app = Flask(__name__)
 
@@ -169,6 +343,10 @@ def make_app(store: Store, on_refresh: Optional[Callable[[], None]] = None) -> F
     def index():
         return render_page(store.snapshot()), 200, {"Content-Type": "text/html; charset=utf-8"}
 
+    @app.get("/breaking")
+    def breaking():
+        return render_breaking(store.snapshot()), 200, {"Content-Type": "text/html; charset=utf-8"}
+
     @app.get("/api/endpoints")
     def api_endpoints():
         return jsonify(
@@ -180,6 +358,7 @@ def make_app(store: Store, on_refresh: Optional[Callable[[], None]] = None) -> F
                 "GET /api/feeds",
                 "GET /api/status",
                 "POST /api/refresh",
+                "GET /breaking  (strona HTML - tylko pilne, auto-refresh)",
                 "GET /healthz",
             ],
         )
