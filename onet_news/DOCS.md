@@ -21,6 +21,8 @@ Scrape status.
 {
   "status": "ok",
   "scraped_at": "2026-11-18T09:30:00+00:00",
+  "age_minutes": 10,
+  "stale": false,
   "last_attempt": "2026-11-18T09:30:05+00:00",
   "last_error": null,
   "livebar_url": "https://livebar.onet.pl/desktop/02a91f84-...",
@@ -32,6 +34,14 @@ Scrape status.
 
 `status`: `waiting` (before first scrape), `ok`, `degraded` (last scrape
 failed, stale data served).
+
+`age_minutes`: whole minutes since the last **successful** update
+(`null` before the first scrape). The HTML pages display it as a relative
+time („ostatnia aktualizacja: 10 min temu").
+
+`stale`: `true` when the last successful update is older than **30 min**
+(`STALE_AFTER_MINUTES`). Use it to build a notification automation; the UI
+shows an orange „problem with data fetching" warning in the same case.
 
 ## `GET /api/articles?limit=60&include_breaking=1`
 
@@ -95,6 +105,17 @@ Triggers a scrape in the background.
 ```json
 {"ok": true, "message": "scrape started in background"}
 ```
+
+## `GET /breaking`
+
+Standalone HTML page with only the livebar (breaking) items — intended for
+embedding in a dashboard card. No article title heading and no counter; the
+header shows a pulsing dot and the relative last-update time
+(„ostatnia aktualizacja: 10 min temu"), which turns orange with a
+„problem with data fetching" notice when the data is older than 30 min.
+Features: title search (Polish-diacritic-insensitive), category chips,
+60 s auto-refresh preserving the active filters, light/dark theme.
+Served with `X-Frame-Options: SAMEORIGIN` (same-origin embedding allowed).
 
 ## Article object
 

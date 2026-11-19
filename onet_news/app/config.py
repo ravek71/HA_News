@@ -51,15 +51,6 @@ class Settings:
 
         self.feed_uuids = self._feed_uuids(options)
 
-        self.mqtt_host = str(options.get("mqtt_host") or os.environ.get("MQTT_HOST", "")).strip()
-        self.mqtt_port = _pick(options, "mqtt_port", "MQTT_PORT", 1883, int)
-        self.mqtt_user = str(options.get("mqtt_user") or os.environ.get("MQTT_USER", ""))
-        self.mqtt_password = str(options.get("mqtt_password") or os.environ.get("MQTT_PASSWORD", ""))
-        self.mqtt_topic = str(
-            options.get("mqtt_topic") or os.environ.get("MQTT_TOPIC", "homeassistant")
-        )
-        self.mqtt_enabled = bool(self.mqtt_host)
-
     @staticmethod
     def _feed_uuids(options: dict) -> list:
         value = options.get("feed_uuids")

@@ -3,9 +3,9 @@
 [![Dodaj repozytorium do Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fravek71%2FHA_News)
 
 Aplikacja (add-on) dla Home Assistant, która scrapuje **najciekawsze artykuły
-z Onet.pl** i udostępnia je przez **REST API** (JSON), z opcjonalną publikacją
-do MQTT. Po zainstalowaniu ma własny **panel w pasku bocznym HA** (ingress)
-z podglądem top newsów, wiadomości pilnych i statusu.
+z Onet.pl** i udostępnia je przez **REST API** (JSON). Po zainstalowaniu ma
+własny **panel w pasku bocznym HA** (ingress) z podglądem top newsów,
+wiadomości pilnych i statusu.
 
 ## Jak to działa
 
@@ -39,8 +39,9 @@ Adres bazowy: `http://<adres-HA>:8080` (mapowanie portu 8080/tcp).
 | `GET /api/popular?limit=30` | feed „O tym się mówi" w oryginalnej kolejności (najpopularniejsze) |
 | `GET /api/breaking` | wiadomości pilne z livebar (z godziną) |
 | `GET /api/feeds` | wykryte feedy (sekcje) z liczbą artykułów |
-| `GET /api/status` | status scrapowania: ostatni czas, błędy, URL livebar |
+| `GET /api/status` | status scrapowania: `age_minutes` (wiek ostatniej aktualizacji), `stale` (problem z pobieraniem, gdy >30 min), błędy, URL livebar |
 | `POST /api/refresh` | wymuś odświeżenie teraz (w tle) |
+| `GET /breaking` | strona HTML — tylko pilne, filtry, auto-refresh (do karty na dashboardzie) |
 | `GET /healthz` | health check (watchdog) |
 
 Przykład zwracanej pozycji:
@@ -103,6 +104,56 @@ Sprawdzenie: `curl http://localhost:8080/api/status`
 
 ## Użycie w Home Assistant
 
+### Karta „Pilne" na dashboardzie (iframe z sesją ingress)
+
+App ma dedykowaną stronę **`/breaking`** — tylko wiadomości pilne z livebaru:
+pulsująca czerwona kropka, **wiek ostatniej aktualizacji** („ostatnia
+aktualizacja: 10 min temu"; gdy dane są starsze niż 30 min — pomarańczowe
+ostrzeżenie o problemie z pobieraniem), lista z godzinami, **pole
+wyszukiwania** (z obsługą polskich znaków) i **filtry kategorii** (chipy
+generowane z bieżącej listy), auto-refresh co 60 s z zachowaniem wybranych
+filtrów, tryb jasny/ciemny.
+
+Strona jest serwowana przez **ingress** (ta sama domena i protokół co HA),
+więc do osadzenia w karcie trzeba iframe'a, który sam zaopatrzy się w
+ciasteczko sesji supervisor — to robi karta custom
+**[cookies-iframe-card](https://github.com/louisslee/cookies-iframe-card)**
+(jeden plik JS; `type: webview` **nie istnieje** w core HA).
+
+1. **Instalacja karty** (raz):
+   - **HACS**: *Frontend* → *+* (dodaj repozytorium) →
+     `louisslee/cookies-iframe-card` → *Download*, albo
+   - **ręcznie**: pobierz
+     `https://raw.githubusercontent.com/louisslee/cookies-iframe-card/main/dist/cookies-iframe-card.js`
+     do folderu `www/` katalogu konfiguracji HA i zarejestruj zasób:
+     *Ustawienia → Panele → (dashboard) → ⋮ → Zasoby → Dodaj* z URL
+     `/local/cookies-iframe-card.js`, typ: *Moduł JavaScript (JavaScript module)*.
+2. **Adres strony**: otwórz panel **Onet News** z paska bocznego HA i weź
+   z paska przeglądarki prefiks do `/api/hassio_ingress/<TOKEN>/`
+   (prefiks bywa też `/api/ingress/` — zależy od wersji HA), doklej `/breaking`:
+
+   ```
+   https://<twoj-adres-HA>/api/hassio_ingress/<TOKEN>/breaking
+   ```
+3. **Karta** (dashboard → *Dodaj kartę* → *custom* → *Cookies Iframe Card*,
+   albo YAML):
+
+   ```yaml
+   type: custom:cookies-iframe-card
+   title: Pilne — Onet
+   url: https://<twoj-adres-HA>/api/hassio_ingress/<TOKEN>/breaking
+   aspect_ratio: 56%
+   ```
+
+Uwagi:
+- adres musi być z **tej samej domeny i protokołu** co HA (HTTPS), inaczej
+  przeglądarka zablokuje iframe (mixed content); port 8080 z LAN nie jest
+  potrzebny,
+- `TOKEN` to długi łańcuch z adresu panelu (nie ID appy, np.
+  `b6f664cb_onet_news`); zmienia się tylko przy usunięciu i reinstalacji appy,
+- `aspect_ratio` to **procent szerokości** karty (56% ≈ 16:9, 100% = kwadrat),
+- karta odświeża ciasteczko sesji co 10 min, więc iframe nie „wygasa".
+
 ### Sensor przez integrację `rest`
 
 ```yaml
@@ -126,7 +177,7 @@ automation:
   - alias: "Onet - wiadomość pilna"
     trigger:
       - platform: state
-        entity_id: sensor.onet_pilne_liczba
+        entity_id: sensor.onet_breaking_count
     action:
       - service: notify.mobile_app_twoj_telefon
         data:
@@ -134,20 +185,6 @@ automation:
           message: >-
             {{ states('sensor.onet_top_news') }}
 ```
-
-### MQTT (opcjonalnie)
-
-Jeśli w HA działający jest broker MQTT, ustaw w konfiguracji app (albo
-`environment` w `config.yaml`) zmienne:
-
-```yaml
-environment:
-  MQTT_HOST: "mqtt"
-  # MQTT_USER / MQTT_PASSWORD / MQTT_PORT (domyślnie 1883) / MQTT_TOPIC (domyślnie "homeassistant")
-```
-
-App opublikuje auto-discovery sensora `sensor.onet_news_top` z 5 najlepszymi
-artykułami (JSON), odświeżanym po każdym scrapie.
 
 ## Konfiguracja
 
@@ -158,9 +195,14 @@ artykułami (JSON), odświeżanym po każdym scrapie.
 | `log_level` | `info` | `debug`/`info`/`warning`/`error` |
 | `MAX_FEEDS` (env) | 12 | ile feedów pobierać ze strony głównej |
 | `FEED_UUIDS` (env) | — | lista UUID (po przecinku) — pominij auto-wykrywanie |
-| `MQTT_HOST` (env) | — | włącza publikację do MQTT |
 
 Polecenie `POST /api/refresh` pozwala wymusić odświeżenie bez czekania na cykl.
+
+**Wiek danych:** strony app i `/api/status` pokazują, ile min temu było
+ostatnie **udane** odświeżenie (np. „ostatnia aktualizacja: 10 min temu").
+Jeśli jest starsze niż **30 min** (`STALE_AFTER_MINUTES`), UI pokazuje
+ostrzeżenie o problemie z pobieraniem danych, a `/api/status` zwraca
+`"stale": true` — z tego pola można np. zbudować automat powiadamiający.
 
 ## Uwagi prawne
 
@@ -184,7 +226,6 @@ HA_News/
         ├── config.py          # opcje: /data/options.json > env > domyślne
         ├── models.py          # model Article
         ├── scraper.py         # pobieranie i ranking (strona, feed API, livebar)
-        ├── server.py          # REST API (Flask)
-        ├── store.py           # thread-safe magazyn ostatniego wyniku
-        └── mqtt_publisher.py  # opcjonalny MQTT discovery
+        ├── server.py          # REST API (Flask) + strony HTML
+        └── store.py           # thread-safe magazyn ostatniego wyniku
 ```

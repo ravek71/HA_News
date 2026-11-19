@@ -5,9 +5,27 @@ import threading
 from datetime import datetime, timezone
 from typing import Optional
 
+# A last successful update older than this is reported as a data-fetching
+# problem (stale) in the UI and in /api/status.
+STALE_AFTER_MINUTES = 30
+
 
 def _now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def age_minutes(scraped_at: Optional[str]) -> Optional[int]:
+    """Whole minutes since the last successful update (None = no data yet)."""
+    if not scraped_at:
+        return None
+    try:
+        then = datetime.fromisoformat(scraped_at)
+    except ValueError:
+        return None
+    if then.tzinfo is None:
+        then = then.replace(tzinfo=timezone.utc)
+    delta = datetime.now(timezone.utc) - then
+    return max(0, int(delta.total_seconds() // 60))
 
 
 class Store:
@@ -34,6 +52,8 @@ class Store:
                 return {
                     "status": "waiting",
                     "scraped_at": None,
+                    "age_minutes": None,
+                    "stale": False,
                     "last_attempt": self._last_attempt,
                     "last_error": self._last_error,
                     "livebar_url": None,
@@ -48,4 +68,7 @@ class Store:
             snap["status"] = "degraded" if self._last_error else "ok"
             snap["last_attempt"] = self._last_attempt
             snap["last_error"] = self._last_error
+            age = age_minutes(self._result.get("scraped_at"))
+            snap["age_minutes"] = age
+            snap["stale"] = age is not None and age > STALE_AFTER_MINUTES
             return snap

@@ -6,7 +6,6 @@ import threading
 import time
 
 from .config import settings
-from .mqtt_publisher import MqttPublisher
 from .scraper import OnetScraper
 from .server import make_app
 from .store import Store
@@ -22,7 +21,6 @@ def main() -> None:
 
     store = Store()
     scraper = OnetScraper(settings)
-    publisher = MqttPublisher(settings)
     scrape_lock = threading.Lock()
 
     def do_scrape() -> None:
@@ -38,7 +36,6 @@ def main() -> None:
                 len(result["feeds"]),
                 len(result["breaking"]),
             )
-            publisher.publish(result)
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
             log.exception("scrape failed: %s", exc)
             store.update_error(str(exc))
