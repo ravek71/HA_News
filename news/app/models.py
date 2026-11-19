@@ -15,6 +15,7 @@ class Article:
     source: Optional[str] = None
     section: Optional[str] = None
     category: Optional[str] = None
+    site: str = "onet"  # aggregator source: "onet" | "wp"
     kind: str = "article"
     is_premium: bool = False
     summary: Optional[str] = None

@@ -8,3 +8,9 @@ configuration:
   log_level:
     name: "Poziom logów"
     description: "Szczegółowość logów aplikacji."
+  enable_onet:
+    name: "Włącz Onet.pl"
+    description: "Scrape artykułów i wiadomości pilnych z Onet.pl."
+  enable_wp:
+    name: "Włącz WP.pl"
+    description: "Scrape artykułów i wiadomości pilnych z WP.pl."

@@ -5,12 +5,12 @@ import logging
 import threading
 import time
 
+from .aggregator import Aggregator
 from .config import settings
-from .scraper import OnetScraper
 from .server import make_app
 from .store import Store
 
-log = logging.getLogger("onet_news")
+log = logging.getLogger("news")
 
 
 def main() -> None:
@@ -20,7 +20,7 @@ def main() -> None:
     )
 
     store = Store()
-    scraper = OnetScraper(settings)
+    aggregator = Aggregator(settings)
     scrape_lock = threading.Lock()
 
     def do_scrape() -> None:
@@ -28,13 +28,14 @@ def main() -> None:
             log.info("scrape already in progress, skipping")
             return
         try:
-            result = scraper.scrape()
+            result = aggregator.scrape()
             store.update(result)
             log.info(
-                "scrape ok: %d articles, %d feeds, %d breaking",
+                "scrape ok: %d articles, %d breaking (onet: %d, wp: %d)",
                 len(result["articles"]),
-                len(result["feeds"]),
                 len(result["breaking"]),
+                result["sources"]["onet"]["articles"],
+                result["sources"]["wp"]["articles"],
             )
         except Exception as exc:  # noqa: BLE001 - keep the loop alive
             log.exception("scrape failed: %s", exc)

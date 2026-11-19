@@ -21,6 +21,15 @@ def _load_options() -> dict:
         return {}
 
 
+def _bool(value: Any) -> bool:
+    """Cast HA options (real booleans) and env vars ("1"/"true"/...) to bool."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return bool(value)
+    return str(value).strip().lower() not in ("0", "false", "no", "off", "")
+
+
 def _pick(options: dict, key: str, env: str, default: Any, cast: Callable[[Any], Any]) -> Any:
     if options.get(key) is not None:
         try:
@@ -49,7 +58,21 @@ class Settings:
         self.timeout = _pick(options, "timeout", "TIMEOUT", 30, int)
         self.log_level = str(_pick(options, "log_level", "LOG_LEVEL", "INFO", str)).upper()
 
+        # which news sources to scrape (HA options: enable_onet / enable_wp)
+        self.enable_onet = _pick(options, "enable_onet", "ENABLE_ONET", True, _bool)
+        self.enable_wp = _pick(options, "enable_wp", "ENABLE_WP", True, _bool)
+
         self.feed_uuids = self._feed_uuids(options)
+
+    @property
+    def enabled_sources(self) -> list:
+        """Ordered list of enabled source names: ("onet", ...) and/or ("wp", ...)."""
+        out = []
+        if self.enable_onet:
+            out.append("onet")
+        if self.enable_wp:
+            out.append("wp")
+        return out
 
     @staticmethod
     def _feed_uuids(options: dict) -> list:

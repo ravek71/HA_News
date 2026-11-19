@@ -106,6 +106,21 @@ def clean_url(url: str) -> str:
         return url
 
 
+def livebar_sort_minutes(hhmm: str, now: datetime, offset_hours: int) -> Optional[float]:
+    """Approximate minutes elapsed since an 'HH:MM' shown in PL local time.
+
+    The livebar only shows a clock (no date), so the local offset is
+    approximated from the current month (CEST = +2, CET = +1).
+    """
+    match = re.match(r"^(\d{1,2}):(\d{2})$", hhmm or "")
+    if not match:
+        return None
+    local_min = int(match.group(1)) * 60 + int(match.group(2))
+    utc_min = local_min - offset_hours * 60
+    delta = (now.hour * 60 + now.minute - utc_min) % 1440
+    return float(delta)
+
+
 def category_from_url(url: str) -> Optional[str]:
     """Derive a human-readable category from an article URL."""
     if not url:
@@ -274,6 +289,9 @@ class OnetScraper:
         page = self._get_text(iframe_url)
         soup = BeautifulSoup(page, "html.parser")
         container = soup.select_one("div[data-section='livebar']") or soup
+        now = datetime.now(timezone.utc)
+        # the livebar clock is PL local time: CEST (Mar-Oct) = UTC+2, else CET
+        offset_hours = 2 if now.month in (3, 4, 5, 6, 7, 8, 9, 10) else 1
         items = []
         seen = set()
         for anchor in container.select("a.item"):
@@ -295,17 +313,18 @@ class OnetScraper:
                 title = full_text[len(published):].strip(" \t:|–-")
             if not title:
                 continue
-            items.append(
-                Article(
-                    title=title,
-                    url=href,
-                    section="Na żywo (pilne)",
-                    category=category_from_url(href),
-                    kind="live",
-                    breaking=True,
-                    published=published,
-                )
+            item = Article(
+                title=title,
+                url=href,
+                section="Na żywo (pilne)",
+                category=category_from_url(href),
+                kind="live",
+                breaking=True,
+                published=published,
             )
+            # sortable key for the cross-source merge (minutes since "now")
+            item._sort_min = livebar_sort_minutes(published, now, offset_hours)
+            items.append(item)
         return items
 
     # ------------------------------------------------------------------
@@ -427,13 +446,15 @@ class OnetScraper:
 
         articles = self._merge_rank(all_articles, breaking, main_uuid)
 
+        # Article objects (not dicts): the aggregator merges sources and does
+        # the final to_dict() conversion.
         return {
             "scraped_at": scraped_at,
             "livebar_url": livebar_url,
             "main_feed": main_feed,
             "feeds": feeds,
-            "articles": [a.to_dict() for a in articles],
-            "popular": [a.to_dict() for a in popular],
-            "breaking": [a.to_dict() for a in breaking],
+            "articles": articles,
+            "popular": popular,
+            "breaking": breaking,
             "errors": errors,
         }

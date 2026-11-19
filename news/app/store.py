@@ -34,12 +34,14 @@ class Store:
         self._result: Optional[dict] = None
         self._last_error: Optional[str] = None
         self._last_attempt: Optional[str] = None
+        self._all_ok = True  # every enabled source succeeded in last scrape
 
     def update(self, result: dict) -> None:
         with self._lock:
             self._result = result
             self._last_error = None
             self._last_attempt = result.get("scraped_at") or _now()
+            self._all_ok = result.get("all_ok", True)
 
     def update_error(self, error: str) -> None:
         with self._lock:
@@ -50,12 +52,15 @@ class Store:
         with self._lock:
             if self._result is None:
                 return {
-                    "status": "waiting",
+                    # no data yet, but a scrape was attempted and failed
+                    "status": "waiting" if not self._last_error else "degraded",
                     "scraped_at": None,
                     "age_minutes": None,
                     "stale": False,
                     "last_attempt": self._last_attempt,
                     "last_error": self._last_error,
+                    "sources": {},
+                    "all_ok": True,
                     "livebar_url": None,
                     "main_feed": None,
                     "feeds": [],
@@ -65,7 +70,7 @@ class Store:
                     "errors": [],
                 }
             snap = dict(self._result)
-            snap["status"] = "degraded" if self._last_error else "ok"
+            snap["status"] = "degraded" if (self._last_error or not self._all_ok) else "ok"
             snap["last_attempt"] = self._last_attempt
             snap["last_error"] = self._last_error
             age = age_minutes(self._result.get("scraped_at"))

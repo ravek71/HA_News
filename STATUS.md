@@ -1,8 +1,8 @@
 # STATUS — stan projektu HA_News
 
-Ostatnia aktualizacja: 2026-11-19 (popołudnie)
+Ostatnia aktualizacja: 2026-11-19 (wieczór)
 
-## Stan: wersja 1.1.0 gotowa na dysku (do wgrania na GitHuba); 1.0.2 działa w HA użytkownika
+## Stan: **1.1.0 działa w HA użytkownika** (na GitHubie, GHCR, zaktualizowana); **1.2.0 (WP.pl) gotowa na dysku** — testy lokalne zielone, do wgrania na GitHuba
 
 ## Co działa (zweryfikowane)
 
@@ -99,6 +99,107 @@ czysty, `__main__.py` bez publisher.
 4. Weryfikacja: `/breaking` bez nagłówka, "ostatnia aktualizacja: X min
    temu", `/api/status` z `age_minutes`/`stale`.
 
+**STATUS 1.1.0 (2026-11-19): ZROBIONE** — user wgrał pliki na main, CI
+zbudował 1.1.0 do GHCR, user zaktualizował appę w HA.
+
+## WERSJA 1.2.0 (sesja 2026-11-19 — na dysku, NIE na GitHubie)
+
+Zlecenie: "dodać obsługę artykułów z wp.pl, taka sama zasada + możliwość
+włączenia źródeł w konfiguracji onet.pl i wp.pl".
+
+### Źródła WP (zweryfikowane live; GraphQL = dead end, RSS 404)
+
+Czysty statyczny HTML (ta sama zasada co Onet):
+1. **`https://www.wp.pl/`** — SSR teasery z atrybutem `data-bdbd`
+   (HTML-escaped JSON, `&#34;` = `"`). 184 kotwice: 151 `sgTeaser`,
+   27 `sgTextlink`. **Kategoria `600` = główny strumień (115 pozycji)**.
+   Pola: `type`, `categoryId`, `dotParams.{cid,ctype}` (article/video),
+   `pinned`. Tytuł: `h3.wp-teaser-title` / `span.wp-text-link-title`;
+   obraz: `v.wpimg.pl`; sponsorowane: `.wp-teaser-sponsored-label`.
+   **Brak czasu publikacji** na homepage.
+2. **`https://wiadomosci.wp.pl/`** — sekcja **"Najnowsze"**:
+   `a.timeline-entry > time[datetime]` (UTC, np. `12:39Z` = 13:39 PL)
+   + `h3` tytuł — 35 pozycji = odpowiednik livebaru (breaking z czasami).
+
+Kategorie WP: z **domeny URL** (jak Onet): `sportowefakty.wp.pl` → sport,
+`finanse.wp.pl` → finanse, `pogoda.wp.pl` → pogoda itd.
+
+### Zmiany kodu (wszystko na dysku, testy zielone)
+
+- **NOWY `app/wp_scraper.py`** — `WpScraper`: `_parse_home` (data-bdbd,
+  cat 600, filtry: sponsored, SKIP_TITLE_MARKERS, dedup po URL) +
+  `_parse_timeline` (timeline-entry, `datetime` UTC → `_sort_min`).
+- **NOWY `app/aggregator.py`** — `Aggregator`: źródła w równoległych
+  wątkach (awaria jednego nie blokuje drugiego), breaking scalane po
+  czasie (nowe na górze, `_breaking_key` z `_sort_min`), ranking spleciony
+  `_interleave` (onet #1, wp #1, …) z **wyłączonym pilnymi**, status
+  per źródło (`sources`, `all_ok`).
+- `app/models.py` — `Article.site: str = "onet"`.
+- `app/scraper.py` — `scrape()` zwraca obiekty `Article` (agregator robi
+  `to_dict`); `livebar_sort_minutes()` przybliża HH:MM (CEST/CET wg
+  miesiąca) → `_sort_min` dla merge'u.
+- `app/config.py` — `_bool()` + opcje `enable_onet`/`enable_wp`
+  (env `ENABLE_ONET`/`ENABLE_WP`, default True) + `Settings.enabled_sources`.
+- `app/__main__.py` — `Aggregator` zamiast `OnetScraper`; log
+  "scrape ok: %d articles, %d breaking (onet: %d, wp: %d)".
+- `app/store.py` — `all_ok` (status degraded gdy zawiedzie 1 źródło);
+  fix: bez danych + błąd → `degraded` (nie `waiting`).
+- `app/server.py` — tagi źródła (`Onet`/`WP`) w `_article_li`, sekcja
+  **"Źródła"** w `PAGE` (`@@SOURCES@@`), tytuły "Pilne — Onet i WP",
+  **fix `_limit()`** — `/api/articles` i `/api/popular` wracały 500
+  (funkcja istniała tylko w użyciu, nie w definicji!).
+- `config.yaml` — **1.2.0**, `enable_onet`/`enable_wp: bool` w schemacie,
+  description z wp.pl.
+- `translations/pl.yaml` — "Włącz Onet.pl" / "Włącz WP.pl".
+- `CHANGELOG.md` (wpis 1.2.0), `DOCS.md` (sources/all_ok, breaking z obu,
+  pole `site`, ranking spleciony), `README.md` (WP, przełączniki, struktura).
+
+### Testy (2026-11-19, lokalnie, Python 3.14 + venv `Temp\opencode\hanevs`)
+
+- Live scrape: Onet 60 art. + 10 pilnych, WP 113 art. + 35 pilnych;
+  merge breaking 45 (posortowane: onet 14:39 → wp "16 min" → …).
+- Edge cases: tylko onet / tylko wp / wp fails (degraded, onet served) /
+  oba fail / oba wyłączone (błąd w statusie).
+- Serwer Flask na :8099: `/api/status` (sources, all_ok), `/api/articles`
+  (60 = 30+30 splecione), `/api/popular` (30, Onet), `/api/feeds` (12),
+  `/api/breaking` (45), `/healthz`, `/` (sekcja Źródła: "ok — 60 artykułów,
+  10 pilnych"), `/breaking` w przeglądarce (etykiety, filtry, bez błędów JS).
+
+### Rename folderu + wydzielony Onet (2026-11-19, 1.2.1 — na dysku)
+
+- `onet_news/` → **`news/`** (apka zawiera Onet + WP; folder nie musi być
+  zgodny ze slugiem — zweryfikowane w kodzie supervisora:
+  `supervisor/store/data.py` → `app_slug = f"{repository}_{app['slug']}"`,
+  slug pochodzi z **`slug` w `config.yaml`**, a katalogi app wykrywają
+  `**/config.*`; CI `find-addons` też dynamiczne).
+- **Slug zostaje `onet_news`** (celowo!) — dzięki temu apka w HA
+  (ID `b6f664cb_onet_news`) zaktualizuje się in-place: ten sam token
+  ingress, karta na dashboardzie bez zmian, brak potrzeby reinstalacji.
+- `app/scraper.py` → **`app/onet_scraper.py`** (wzór: `wp_scraper.py`);
+  importy zaktualizowane w `aggregator.py` i `wp_scraper.py`; logger
+  `onet_news` → `news` (`__main__.py`).
+- Wersja: **1.2.1** (`config.yaml`, `__init__.py`), wpis w `CHANGELOG.md`;
+  README: struktura + ścieżki (`cd news`, `news/config.yaml`).
+- Testy: `py_compile` OK, live (onet 60+10, wp 114+35, breaking 45),
+  edge cases OK, serwer :8099 (endpointy 200).
+
+### TODO (kolejność)
+
+1. **Użytkownik wgruje na GitHub main** (Web UI): utworzyć folder **`news/`**
+   i wgrać do niego (nowa ścieżka!): `app/__init__.py`, `app/__main__.py`,
+   `app/config.py`, `app/models.py`, `app/onet_scraper.py` (ZASTĘPUJE
+   `scraper.py`), `app/wp_scraper.py`, `app/aggregator.py`, `app/server.py`,
+   `app/store.py`, `config.yaml` (1.2.1), `translations/pl.yaml`,
+   `CHANGELOG.md`, a potem **usunąć stary folder `onet_news/`** na GitHubie.
+   Dodatkowo: `README.md` (zmieniona struktura/ścieżki).
+   Uwaga: pliki `DOCS.md`, `Dockerfile`, `requirements.txt` są bez zmian
+   (wewnętrzne ścieżki `app/...` nie zależą od nazwy folderu).
+2. **CI** zbuduje 1.2.1 do GHCR (find-addons wykryje `news/` automatycznie).
+3. **Update w HA** — in-place (ten sam slug `onet_news`); w opcjach appy
+   przełączniki "Włącz Onet.pl" / "Włącz WP.pl"; karta "Pilne" bez zmian.
+4. Weryfikacja: karta "Pilne" z wpisami z obu źródeł, sekcja "Źródła"
+   w panelu, `/api/status.sources`.
+
 ## BŁĄD "No changelog found for app b6f664cb_onet_news!" (2026-11-19)
 
 Przy klikaniu Update HA pokazywało w dialogu:
@@ -174,7 +275,9 @@ błąd → przeładować store (Marketplace → przycisk reload / `POST
 
 - Windows + PowerShell 5 (skrypty diagnostyczne jako .ps1 w
   C:\Users\Rafal\AppData\Local\Temp\opencode, bez znaków nie-ASCII).
-- Brak lokalnego Pythona i git (tylko stuby z MS Store) — walidacja kodu
-  przez CI; projekt ma katalog `.git`, ale bez zainstalowanego git nie da
-  się commitować — pliki wgruje użytkownik ręcznie przez GitHub Web UI.
+- **Python 3.14.10 DOSTĘPNY** (od 2026-11-19 — wcześniej były tylko stuby
+  z MS Store); venv do testów: `C:\Users\Rafal\AppData\Local\Temp\opencode\hanevs`
+  (requests, beautifulsoup4, flask). Testy: `Temp\opencode\test_ha_news.py`
+  (live) i `test_edge.py` (edge cases).
+- Brak lokalnego git — pliki wgruje użytkownik ręcznie przez GitHub Web UI.
 - Użytkownik komunikuje się po polsku.

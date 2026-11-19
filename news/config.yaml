@@ -1,10 +1,10 @@
 name: "Onet News"
-version: "1.1.0"
+version: "1.2.1"
 slug: "onet_news"
 description: >-
-  Web scraping najciekawszych artykułów z Onet.pl (feed „O tym się mówi"
-  + livebar z wiadomościami pilnymi), udostępniane do Home Assistant
-  przez interfejs REST API.
+  Web scraping najciekawszych artykułów z Onet.pl i WP.pl (ranking +
+  wiadomości pilne z obu źródeł), udostępniane do Home Assistant przez
+  interfejs REST API. Źródła można włączać/wyłączać w opcjach.
 url: "https://github.com/ravek71/HA_News"
 arch:
   - amd64
@@ -19,10 +19,14 @@ options:
   interval_minutes: 10
   max_articles: 60
   log_level: "info"
+  enable_onet: true
+  enable_wp: true
 schema:
   interval_minutes: int(1,1440)
   max_articles: int(10,500)
   log_level: list(debug|info|warning|error)
+  enable_onet: bool
+  enable_wp: bool
 watchdog: "http://[HOST]:[PORT:8080]/healthz"
 panel_icon: mdi:newspaper-variant-outline
 panel_title: "Onet News"

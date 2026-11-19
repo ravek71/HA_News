@@ -17,7 +17,7 @@ PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Onet News — HA News</title>
+<title>HA News — Onet i WP</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -69,8 +69,13 @@ PAGE = """<!doctype html>
   </section>
 
   <section>
-    <h2>Feedy</h2>
+    <h2>Feedy (Onet)</h2>
     @@FEEDS@@
+  </section>
+
+  <section>
+    <h2>Źródła</h2>
+    @@SOURCES@@
   </section>
 
   <section class="links">
@@ -87,7 +92,7 @@ BREAKING_PAGE = """<!doctype html>
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Onet — pilne</title>
+<title>Pilne — Onet i WP</title>
 <style>
   :root { color-scheme: light dark; }
   body { font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -248,6 +253,15 @@ def _esc(value) -> str:
     return html.escape(str(value), quote=True) if value is not None else ""
 
 
+def _limit(value: Optional[int], default: int, max_value: int = 500) -> int:
+    """Clamp a ?limit= query param to 1..max_value (default when missing)."""
+    try:
+        n = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(1, min(n, max_value))
+
+
 def _age_pl(minutes: int) -> str:
     """Compact Polish relative age: '10 min temu', '1 godz. 5 min temu'."""
     if minutes < 1:
@@ -274,6 +288,11 @@ def _article_li(article: dict, show_time: bool = True, show_breaking_tag: bool =
     title = _esc(article.get("title"))
     url = _esc(article.get("url"))
     parts = [f'<li><a href="{url}" target="_blank" rel="noopener">{title}']
+    site = article.get("site")
+    if site == "wp":
+        parts.append('<span class="tag">WP</span>')
+    elif site == "onet":
+        parts.append('<span class="tag">Onet</span>')
     if article.get("is_premium"):
         parts.append('<span class="tag premium">premium</span>')
     if show_breaking_tag and article.get("breaking"):
@@ -318,6 +337,28 @@ def render_page(snap: dict) -> str:
         else '<p class="empty">Brak danych.</p>'
     )
 
+    def _source_line(name: str, info: dict) -> str:
+        label = {"onet": "Onet", "wp": "WP"}.get(name, name)
+        if not info.get("enabled"):
+            detail, err = "wyłączone w opcjach", ""
+        elif info.get("ok"):
+            detail, err = (
+                f"ok — {info.get('articles', 0)} artykułów, "
+                f"{info.get('breaking', 0)} pilnych",
+                "",
+            )
+        else:
+            detail, err = "błąd pobierania", _esc(info.get("error"))
+        err_html = f' <span class="err">({err})</span>' if err else ""
+        return f'<li><strong>{label}</strong> <span class="cat">{detail}</span>{err_html}</li>'
+
+    sources = snap.get("sources") or {}
+    sources_html = (
+        "<ul>" + "".join(_source_line(n, s) for n, s in sources.items()) + "</ul>"
+        if sources
+        else '<p class="empty">Brak danych.</p>'
+    )
+
     errors = snap.get("errors") or []
     errors_html = (
         '<section><div class="err">Ostatni błąd: '
@@ -347,6 +388,7 @@ def render_page(snap: dict) -> str:
     page = page.replace("@@BREAKING_COUNT@@", str(len(breaking)))
     page = page.replace("@@BREAKING@@", breaking_html)
     page = page.replace("@@FEEDS@@", feeds_html)
+    page = page.replace("@@SOURCES@@", sources_html)
     return page
 
 
@@ -386,7 +428,7 @@ def make_app(store: Store, on_refresh: Optional[Callable[[], None]] = None) -> F
     @app.get("/api/endpoints")
     def api_endpoints():
         return jsonify(
-            name="HA News - Onet.pl scraper",
+            name="HA News - Onet.pl i WP.pl scraper",
             endpoints=[
                 "GET /api/articles?limit=60&include_breaking=1",
                 "GET /api/popular?limit=30",

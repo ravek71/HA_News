@@ -3,14 +3,18 @@
 [![Dodaj repozytorium do Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2Fravek71%2FHA_News)
 
 Aplikacja (add-on) dla Home Assistant, która scrapuje **najciekawsze artykuły
-z Onet.pl** i udostępnia je przez **REST API** (JSON). Po zainstalowaniu ma
-własny **panel w pasku bocznym HA** (ingress) z podglądem top newsów,
-wiadomości pilnych i statusu.
+z Onet.pl i WP.pl** i udostępnia je przez **REST API** (JSON). Po
+zainstalowaniu ma własny **panel w pasku bocznym HA** (ingress) z podglądem
+top newsów, wiadomości pilnych i statusu. Oba źródła można włączać/wyłączać
+w opcjach appy (domyślnie włączone).
 
 ## Jak to działa
 
-Onet.pl nie ma publicznego RSS, więc app używa tych samych źródeł danych,
-których używa strona główna onet.pl:
+Źródła są scrapowane **równolegle** — awaria jednego nie blokuje drugiego.
+Żadne z nich nie wymaga JavaScriptu ani niepublicznego API.
+
+**Onet.pl** — nie ma publicznego RSS, więc app używa tych samych źródeł
+danych, których używa strona główna onet.pl:
 
 1. **Strona główna** `https://www.onet.pl/` — ze zagnieżdżonej konfiguracji
    JSON app wyciąga:
@@ -24,10 +28,27 @@ których używa strona główna onet.pl:
 3. **Livebar** `https://livebar.onet.pl/desktop/<uuid>` — serwisy HTML z
    wiadomościami pilnymi i godzinami publikacji.
 
-Artykuły są deduplikowane (po URL), wzbogacane kategorią (z domeny/sekcji URL),
-a następnie rankowane według heurystyki: własny wskaźnik ważności Onet
-(`hardness`) + liczba reakcji (`emotions`) + pozycja w feędzie (własny ranking
-Onet) + bonus dla wiadomości pilnych.
+Artykuły Onetu są deduplikowane (po URL), wzbogacane kategorią (z domeny/
+sekcji URL), a następnie rankowane według heurystyki: własny wskaźnik
+ważności Onet (`hardness`) + liczba reakcji (`emotions`) + pozycja w feędzie
+(własny ranking Onet) + bonus dla wiadomości pilnych.
+
+**WP.pl** — czysty statyczny HTML (bez JavaScriptu i bez niepublicznego
+API):
+
+1. **Strona główna** `https://www.wp.pl/` — teasery renderowane po stronie
+   serwera (SSR) z atrybutem `data-bdbd` (JSON); kategoria `600` to główny
+   strumień (odpowiednik „O tym się mówi").
+2. **Oś czasu „Najnowsze"** `https://wiadomosci.wp.pl/` — lista z pełnymi
+   znacznikami czasu `<time datetime="…">` (UTC) — odpowiednik livebaru,
+   źródło wiadomości pilnych.
+
+Artykuły WP są tak samo deduplikowane i kategoryzowane (kategoria z domeny,
+np. `sportowefakty.wp.pl` → sport).
+
+**Scalanie:** lista pilnych łączy oba źródła posortowane po czasie
+(najnowsze na górze, każdy wpis z etykietą `site`: `onet`/`wp`), a ranking
+top newsów przeplata oba źródła (onet #1, wp #1, onet #2, wp #2, …).
 
 ## Endpunkty REST API
 
@@ -35,13 +56,13 @@ Adres bazowy: `http://<adres-HA>:8080` (mapowanie portu 8080/tcp).
 
 | Endpunkt | Opis |
 |---|---|
-| `GET /api/articles?limit=60&include_breaking=1` | wszystkie artykuły, posortowane wg punktu |
-| `GET /api/popular?limit=30` | feed „O tym się mówi" w oryginalnej kolejności (najpopularniejsze) |
-| `GET /api/breaking` | wiadomości pilne z livebar (z godziną) |
-| `GET /api/feeds` | wykryte feedy (sekcje) z liczbą artykułów |
-| `GET /api/status` | status scrapowania: `age_minutes` (wiek ostatniej aktualizacji), `stale` (problem z pobieraniem, gdy >30 min), błędy, URL livebar |
+| `GET /api/articles?limit=60&include_breaking=1` | ranking wszystkich aktywnych źródeł, splecione (onet #1, wp #1, …) |
+| `GET /api/popular?limit=30` | feed „O tym się mówi" w oryginalnej kolejności (najpopularniejsze, Onet) |
+| `GET /api/breaking` | wiadomości pilne z obu źródeł, posortowane po czasie (najnowsze na górze, etykieta `site`) |
+| `GET /api/feeds` | wykryte feedy (sekcje) z liczbą artykułów (Onet) |
+| `GET /api/status` | status: `age_minutes` (wiek), `stale` (>30 min), `sources` (status per źródło), `all_ok`, błędy |
 | `POST /api/refresh` | wymuś odświeżenie teraz (w tle) |
-| `GET /breaking` | strona HTML — tylko pilne, filtry, auto-refresh (do karty na dashboardzie) |
+| `GET /breaking` | strona HTML — tylko pilne (oba źródła, etykiety), filtry, auto-refresh (do karty na dashboardzie) |
 | `GET /healthz` | health check (watchdog) |
 
 Przykład zwracanej pozycji:
@@ -51,6 +72,7 @@ Przykład zwracanej pozycji:
   "title": "Nowa prognoza Onetu. Rekordowa przewaga KO nad PiS",
   "url": "https://wiadomosci.onet.pl/kraj/nowa-prognoza-wyborcza-onetu-.../xq52888",
   "image": "https://ocdn.eu/pulscms/MDA_/830ab2db....png",
+  "site": "onet",
   "source": "Onet",
   "section": "O tym się mówi",
   "category": "kraj",
@@ -66,7 +88,9 @@ Przykład zwracanej pozycji:
 }
 ```
 
-Wpisy z livebar mają dodatkowo `"published": "10:56"` i `"breaking": true`.
+Każdy wpis ma pole `site` — źródło scrapowania: `"onet"` albo `"wp"`.
+Wpisy pilne mają dodatkowo `"breaking": true` oraz `"published"` (godzina
+`HH:MM` dla livebar Onetu; względny czas, np. `19 min`, dla „Najnowsze" WP).
 
 ## Instalacja
 
@@ -74,7 +98,7 @@ Wpisy z livebar mają dodatkowo `"published": "10:56"` i `"breaking": true`.
 
 1. Wrzuć projekt na GitHub jako **publiczne** repozytorium
    `https://github.com/ravek71/HA_News` (plik `repository.yaml`,
-   `onet_news/config.yaml` i badge są już skonfigurowane dla tego loginu;
+   `news/config.yaml` i badge są już skonfigurowane dla tego loginu;
    przy forku zmień `url`/`image`/`ghcr.io/...` na swój).
 2. Utwórz na GitHubzie pusty **publiczny** repozytorium pakietów: po pierwszym
    zbudowaniu pakiet `ghcr.io/ravek71/onet-news` jest prywatny — zmień jego
@@ -92,7 +116,7 @@ Wpisy z livebar mają dodatkowo `"published": "10:56"` i `"breaking": true`.
 ### Opcja B — zwykły Docker (bez repozytorium)
 
 ```bash
-cd onet_news
+cd news
 docker build -t ha-onet-news .
 docker run -d --name onet-news --restart unless-stopped \
   -p 8080:8099 \
@@ -106,13 +130,14 @@ Sprawdzenie: `curl http://localhost:8080/api/status`
 
 ### Karta „Pilne" na dashboardzie (iframe z sesją ingress)
 
-App ma dedykowaną stronę **`/breaking`** — tylko wiadomości pilne z livebaru:
-pulsująca czerwona kropka, **wiek ostatniej aktualizacji** („ostatnia
-aktualizacja: 10 min temu"; gdy dane są starsze niż 30 min — pomarańczowe
-ostrzeżenie o problemie z pobieraniem), lista z godzinami, **pole
-wyszukiwania** (z obsługą polskich znaków) i **filtry kategorii** (chipy
-generowane z bieżącej listy), auto-refresh co 60 s z zachowaniem wybranych
-filtrów, tryb jasny/ciemny.
+App ma dedykowaną stronę **`/breaking`** — tylko wiadomości pilne
+(scalone z livebar Onetu i osi czasu „Najnowsze" WP, najnowsze na górze,
+każdy wpis z etykietą źródła): pulsująca czerwona kropka, **wiek ostatniej
+aktualizacji** („ostatnia aktualizacja: 10 min temu"; gdy dane są starsze niż
+30 min — pomarańczowe ostrzeżenie o problemie z pobieraniem), lista z
+godzinami, **pole wyszukiwania** (z obsługą polskich znaków) i **filtry
+kategorii** (chipy generowane z bieżącej listy), auto-refresh co 60 s z
+zachowaniem wybranych filtrów, tryb jasny/ciemny.
 
 Strona jest serwowana przez **ingress** (ta sama domena i protokół co HA),
 więc do osadzenia w karcie trzeba iframe'a, który sam zaopatrzy się w
@@ -140,7 +165,7 @@ ciasteczko sesji supervisor — to robi karta custom
 
    ```yaml
    type: custom:cookies-iframe-card
-   title: Pilne — Onet
+   title: Pilne — Onet i WP
    url: https://<twoj-adres-HA>/api/hassio_ingress/<TOKEN>/breaking
    aspect_ratio: 56%
    ```
@@ -190,11 +215,18 @@ automation:
 
 | Opcja / zmienna | Domyślnie | Opis |
 |---|---|---|
+| `enable_onet` | `true` | scrape Onet.pl (ranking + pilne) |
+| `enable_wp` | `true` | scrape WP.pl (strumień główny + „Najnowsze") |
 | `interval_minutes` | 10 | co ile minut odświeżać dane |
-| `max_articles` | 60 | ile artykułów trzymać w pamięci / zwracać |
+| `max_articles` | 60 | ile artykułów trzymać w pamięci / zwracać (łącznie, splecionych) |
 | `log_level` | `info` | `debug`/`info`/`warning`/`error` |
 | `MAX_FEEDS` (env) | 12 | ile feedów pobierać ze strony głównej |
 | `FEED_UUIDS` (env) | — | lista UUID (po przecinku) — pominij auto-wykrywanie |
+
+Źródła można przełączać w opcjach appy (panel HA → aplikacja → *Ustaw*)
+albo przez zmienne `ENABLE_ONET` / `ENABLE_WP` w Dockerze. Awarja jednego
+źródła nie blokuje drugiego — status per źródło jest w `GET /api/status`
+(pole `sources`) i w sekcji „Źródła" na stronie app.
 
 Polecenie `POST /api/refresh` pozwala wymusić odświeżenie bez czekania na cykl.
 
@@ -206,8 +238,9 @@ ostrzeżenie o problemie z pobieraniem danych, a `/api/status` zwraca
 
 ## Uwagi prawne
 
-Projekt służy do użytku osobistego. Dane Onet.pl są chronione prawem autorskim;
-app jedynie odczytuje publicznie dostępne treści. Nie publikuj ich ponownie.
+Projekt służy do użytku osobistego. Dane Onet.pl i WP.pl są chronione prawem
+autorskim; app jedynie odczytuje publicznie dostępne treści. Nie publikuj
+ich ponownie.
 
 ## Struktura projektu
 
@@ -215,7 +248,7 @@ app jedynie odczytuje publicznie dostępne treści. Nie publikuj ich ponownie.
 HA_News/
 ├── repository.yaml            # metadane repozytorium (HA app store)
 ├── .github/workflows/         # CI: build + push obrazu do GHCR
-└── onet_news/
+└── news/
     ├── config.yaml            # manifest add-onu (HA)
     ├── Dockerfile
     ├── requirements.txt
@@ -226,7 +259,9 @@ HA_News/
         ├── __main__.py        # pętla scrapera + start serwera
         ├── config.py          # opcje: /data/options.json > env > domyślne
         ├── models.py          # model Article
-        ├── scraper.py         # pobieranie i ranking (strona, feed API, livebar)
+        ├── onet_scraper.py    # Onet: pobieranie (strona, feed API, livebar) + helpery
+        ├── wp_scraper.py      # WP: strumień główny (data-bdbd) + oś czasu „Najnowsze"
+        ├── aggregator.py      # równoległy scrape źródeł + scalanie (ranking, pilne)
         ├── server.py          # REST API (Flask) + strony HTML
         └── store.py           # thread-safe magazyn ostatniego wyniku
 ```
