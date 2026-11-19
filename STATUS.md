@@ -99,6 +99,29 @@ czysty, `__main__.py` bez publisher.
 4. Weryfikacja: `/breaking` bez nagłówka, "ostatnia aktualizacja: X min
    temu", `/api/status` z `age_minutes`/`stale`.
 
+## BŁĄD "No changelog found for app b6f664cb_onet_news!" (2026-11-19)
+
+Przy klikaniu Update HA pokazywało w dialogu:
+`No changelog found for app b6f664cb_onet_news!` (slug, bo pliku brak).
+
+**Przyczyna (potwierdzona w kodzie supervisora):** `supervisor/apps/model.py`
+→ `path_changelog = Path(path_location, "CHANGELOG.md")` — Supervisor szuka
+changelogu **w katalogu appy, obok `config.yaml`** (NIE w korzeniu repo).
+Endpoint `GET /store/addons/<app>/changelog` zwraca ów plik jako plain text;
+frontend pokazuje go w dialogu aktualizacji. Analogicznie `DOCS.md`
+(`path_documentation`) — u nas już był.
+
+**Fix (na dysku, do wgrania na GitHub):**
+- nowy plik `onet_news/CHANGELOG.md` (wersje 1.1.0 → 1.0.0, po polsku),
+- `repository.yaml`: name "HA News" → **"Onet News"** (zgodna nazwa repo
+  w store; `name` w `config.yaml` i tak było "Onet News"),
+- README: tytuł "Onet News — …", `CHANGELOG.md` w strukturze projektu.
+
+**TODO użytkownika:** wgrać na main: `onet_news/CHANGELOG.md`,
+`repository.yaml`, `README.md`. Jeśli po wgraniu dialog nadal pokazuje
+błąd → przeładować store (Marketplace → przycisk reload / `POST
+/store/reload`) albo zrestartować HA — Supervisor cache'uje pliki repo.
+
 ## ZROBIONE (wszystko, co było na liście)
 
 - [x] Apka w HA: **1.0.2** (użytkownik potwierdził "Aktualna wersja: 1.0.2").
