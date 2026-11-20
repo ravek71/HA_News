@@ -177,7 +177,12 @@ Uwagi:
 - `TOKEN` to długi łańcuch z adresu panelu (nie ID appy, np.
   `b6f664cb_onet_news`); zmienia się tylko przy usunięciu i reinstalacji appy,
 - `aspect_ratio` to **procent szerokości** karty (56% ≈ 16:9, 100% = kwadrat),
-- karta odświeża ciasteczko sesji co 10 min, więc iframe nie „wygasa".
+- karta odświeża ciasteczko sesji co 10 min, więc iframe nie „wygasa",
+- **linki w aplikacji mobilnej HA** (od 1.2.2): WebView apki ignoruje
+  `target="_blank"` z iframe'ów, więc strony wykrywają oficjalną apkę
+  (mostek JS `externalApp`/`externalAppV2`) i przekazują kliknięcie do
+  ramy głównej — apka otwiera artykuł w **systemowej przeglądarce**.
+  W zwykłej przeglądarce linki dalej otwierają się w nowej karcie.
 
 ### Sensor przez integrację `rest`
 

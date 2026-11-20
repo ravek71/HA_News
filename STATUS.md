@@ -200,6 +200,13 @@ Kategorie WP: z **domeny URL** (jak Onet): `sportowefakty.wp.pl` → sport,
 - `cookies-iframe-card-v2.js` (auto-retry 401/403, timeout 20 s,
   nakładka błędu) — tekst diagnostyczny zaktualizowany; karta
   **opcjonalna**, nie wymagana dla VPN.
+  **NIE JEST ZAINSTALOWANA w HA użytkownika** — próba użycia
+  `type: custom:cookies-iframe-v2` (2026-11-20) dała błąd
+  "Custom element not found: cookies-iframe-v2", bo plik JS nie jest
+  w zasobach HA. Użytkownik ma działać na **oryginalnej
+  `cookies-iframe-card`** (v1); v2 zostaje na dysku jako zapas
+  (do użycia: `/www/cookies-iframe-card-v2.js` + zasób
+  `/local/cookies-iframe-card-v2.js`, typ JavaScript module).
 
 ### Fix linków w apce mobilnej (2026-11-20, 1.2.2 — na dysku)
 
