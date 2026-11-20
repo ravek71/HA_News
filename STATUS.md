@@ -1,8 +1,8 @@
 # STATUS — stan projektu HA_News
 
-Ostatnia aktualizacja: 2026-11-19 (wieczór)
+Ostatnia aktualizacja: 2026-11-20 (poranek)
 
-## Stan: **1.1.0 działa w HA użytkownika** (na GitHubie, GHCR, zaktualizowana); **1.2.0 (WP.pl) gotowa na dysku** — testy lokalne zielone, do wgrania na GitHuba
+## Stan: **1.1.0 działa w HA użytkownika** (na GitHubie, GHCR, zaktualizowana); **1.2.2 (WP.pl + fix linków w apce mobilnej) gotowa na dysku** — testy lokalne zielone, do wgrania na GitHuba. Karta „Pilne" działa u użytkownika (dom + teren + VPN) po usunięciu LAN IP z apki; jedyne otwarte problemy: linki w apce (fix w 1.2.2) i wgranie 1.2.2 na GitHub.
 
 ## Co działa (zweryfikowane)
 
@@ -183,22 +183,86 @@ Kategorie WP: z **domeny URL** (jak Onet): `sportowefakty.wp.pl` → sport,
 - Testy: `py_compile` OK, live (onet 60+10, wp 114+35, breaking 45),
   edge cases OK, serwer :8099 (endpointy 200).
 
+### Problem VPN na telefonie (ROZWIĄZANY 2026-11-19/20)
+
+- Objaw: karta „Pilne" nie działała na telefonie **przez VPN**
+  (`net::ERR_BLOCKED_BY_RESPONSE`), w domu działała.
+- Root cause: apka HA używała dla dashboardu adresu **LAN**, a karta
+  iframe'owała zawsze adres globalny (duckdns) → dwa różne originy.
+  Supervisor bez ważnej sesji ingress dla danego originu zwraca
+  `401 + X-Frame-Options: SAMEORIGIN` (zweryfikowane curl z internetu:
+  `HTTP/1.1 401 Unauthorized`, `Server: openresty`) → przeglądarka
+  blokuje iframe. Nasza apka nie wysyła żadnych nagłówków blokujących
+  (tylko CORS w `after_request`).
+- Fix (u użytkownika): w apce HA usunięty lokalny adres LAN, zostawione
+  tylko globalne `https://ha.bogura.duckdns.org` → jeden origin, karta
+  działa: dom + teren + VPN.
+- `cookies-iframe-card-v2.js` (auto-retry 401/403, timeout 20 s,
+  nakładka błędu) — tekst diagnostyczny zaktualizowany; karta
+  **opcjonalna**, nie wymagana dla VPN.
+
+### Fix linków w apce mobilnej (2026-11-20, 1.2.2 — na dysku)
+
+Zlecenie: "linki nie otwierają się w osobnym oknie w apce HA"
+(tap na link w karcie „Pilne" = nic; w przeglądarce telefonu działa).
+
+Diagnoza (źródło nowej apki Android, repo `home-assistant/android`):
+- Apka przepisana na Compose: stary `WebViewActivity.kt` deprecated
+  (redirect), WebView konfigurowany w `frontend/FrontendScreen.kt` +
+  `util/HAWebViewClient.kt` + `util/HAWebChromeClient.kt`
+  (ścieżki `app/src/main/kotlin/...`).
+- `HAWebChromeClient` **nie nadpisuje `onCreateWindow`** → linki
+  `target="_blank"` (zwłaszcza z iframe'ów) są ignorowane (tap = nic).
+  To przyczyna problemu.
+- `HAWebViewClient.shouldOverrideUrlLoading` →
+  `FrontendViewModel.onUrlIntercepted()`: URL-e **spoza originu
+  serwera HA** (porównanie scheme+host+port, `hasSameOrigin`) →
+  `FrontendEvent.OpenExternalLink` → otwarcie w **systemowej
+  przeglądarce**; nawigacja jest przechwycona (WebView jej nie ładuje,
+  dashboard zostaje).
+
+Fix (w `news/app/server.py`):
+- Nowy skrypt `COMPANION_LINKS_JS` wstrzykiwany na obie strony
+  (`/` i `/breaking`, placeholder `@@LINKS_JS@@`):
+  - wykrywa oficjalną apkę HA po mostkach JS w ramie głównej:
+    `window.top.externalApp` (V1), `window.top.externalAppV2` (V2),
+    iOS: `webkit.messageHandlers.externalApp`,
+  - **w apce**: intercept click na `<a href="http(s)://...">`
+    (capture phase), `preventDefault()`, `window.top.location.href =
+    url` → apka przejmuje nawigację ramy głównej i otwiera artykuł
+    w systemowej przeglądarce; fallback: `window.open(url, '_blank',
+    'noopener')`,
+  - **poza apką**: no-op — w przeglądarce linki dalej
+    `target="_blank"` (nowa karta).
+- Dostęp do `window.top` działa, bo dashboard i karta są same-origin
+  (duckdns); cross-origin (rzadkie) → `catch` → no-op.
+- Wersja: **1.2.2** (`config.yaml`, `app/__init__.py`), wpis 1.2.2
+  w `CHANGELOG.md`.
+
+Testy (2026-11-20, lokalnie, zielone):
+- `py_compile` OK; serwer :8099: `/breaking` (45 linków) i `/`
+  (85 linków) — skrypt obecny tuż przed `</body>`, brak wyciekniętych
+  `@@LINKS_JS@@`; `/api/status` ok (onet 60+10, wp 115+35, breaking 45).
+- Do potwierdzenia przez użytkownika na telefonie po wgraniu 1.2.2.
+
 ### TODO (kolejność)
 
 1. **Użytkownik wgruje na GitHub main** (Web UI): utworzyć folder **`news/`**
-   i wgrać do niego (nowa ścieżka!): `app/__init__.py`, `app/__main__.py`,
-   `app/config.py`, `app/models.py`, `app/onet_scraper.py` (ZASTĘPUJE
-   `scraper.py`), `app/wp_scraper.py`, `app/aggregator.py`, `app/server.py`,
-   `app/store.py`, `config.yaml` (1.2.1), `translations/pl.yaml`,
-   `CHANGELOG.md`, a potem **usunąć stary folder `onet_news/`** na GitHubie.
-   Dodatkowo: `README.md` (zmieniona struktura/ścieżki).
+   i wgrać do niego (nowa ścieżka!): `app/__init__.py` (1.2.2),
+   `app/__main__.py`, `app/config.py`, `app/models.py`,
+   `app/onet_scraper.py` (ZASTĘPUJE `scraper.py`), `app/wp_scraper.py`,
+   `app/aggregator.py`, `app/server.py` (1.2.2 — fix linków),
+   `app/store.py`, `config.yaml` (1.2.2), `translations/pl.yaml`,
+   `CHANGELOG.md` (1.2.2), a potem **usunąć stary folder `onet_news/`**
+   na GitHubie. Dodatkowo: `README.md` (zmieniona struktura/ścieżki).
    Uwaga: pliki `DOCS.md`, `Dockerfile`, `requirements.txt` są bez zmian
    (wewnętrzne ścieżki `app/...` nie zależą od nazwy folderu).
-2. **CI** zbuduje 1.2.1 do GHCR (find-addons wykryje `news/` automatycznie).
+2. **CI** zbuduje 1.2.2 do GHCR (find-addons wykryje `news/` automatycznie).
 3. **Update w HA** — in-place (ten sam slug `onet_news`); w opcjach appy
    przełączniki "Włącz Onet.pl" / "Włącz WP.pl"; karta "Pilne" bez zmian.
 4. Weryfikacja: karta "Pilne" z wpisami z obu źródeł, sekcja "Źródła"
-   w panelu, `/api/status.sources`.
+   w panelu, `/api/status.sources`, **linki w apce mobilnej** (tap na
+   link otwiera artykuł w systemowej przeglądarce).
 
 ## BŁĄD "No changelog found for app b6f664cb_onet_news!" (2026-11-19)
 

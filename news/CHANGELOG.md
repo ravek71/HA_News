@@ -1,5 +1,16 @@
 # Changelog — Onet News
 
+## 1.2.2
+
+- **Linki w aplikacji mobilnej Home Assistant (Android/iOS)**: dotychczas
+  tapnięcie linku w karcie „Pilne" (iframe) nie robiło nic — WebView apki
+  ignoruje `target="_blank"` z iframe'ów. Strony app wykrywają teraz
+  oficjalną apkę HA (mostek JS `externalApp`/`externalAppV2`) i przekazują
+  kliknięcie do ramy głównej; apka przejmuje takie nawigacje do adresów
+  spoza serwera HA i otwiera artykuł w **systemowej przeglądarce**.
+  W zwykłej przeglądarce (telefon/PC) nic się nie zmienia — linki otwierają
+  się w nowej karcie jak wcześniej.
+
 ## 1.2.1
 
 - Zmiana struktury projektu: główny folder `onet_news/` → `news/` (apka

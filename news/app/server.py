@@ -12,6 +12,45 @@ from .store import STALE_AFTER_MINUTES, Store
 
 log = logging.getLogger(__name__)
 
+# Injected into both HTML pages. Inside the Home Assistant companion app the
+# WebView ignores links with target="_blank" coming from iframes (onCreateWindow
+# is not handled), but it intercepts top-frame navigations to URLs outside the
+# HA server and opens them in the system browser. The app exposes JS bridges
+# (window.externalApp / externalAppV2 on Android, webkit.messageHandlers on
+# iOS) which let us detect it from a same-origin iframe. Outside the app the
+# script is a no-op and target="_blank" keeps opening new browser tabs.
+COMPANION_LINKS_JS = """<script>
+(function () {
+  function inCompanionApp() {
+    try {
+      var top = window.top;
+      if (!top || top === window) return false;
+      if (top.externalApp !== undefined) return true;    // app JS bridge (V1)
+      if (top.externalAppV2 !== undefined) return true;  // app JS bridge (V2, HA >= 2026.4.2)
+      var handlers = top.webkit && top.webkit.messageHandlers;  // iOS app
+      return !!(handlers && handlers.externalApp);
+    } catch (e) {
+      return false; // top frame is cross-origin: treat as a plain browser
+    }
+  }
+  if (!inCompanionApp()) return;
+  document.addEventListener('click', function (ev) {
+    var el = ev.target;
+    while (el && el.tagName !== 'A' && el.parentElement) el = el.parentElement;
+    if (!el || el.tagName !== 'A') return;
+    var url = el.getAttribute('href');
+    if (!url || !/^https?:/i.test(url)) return;
+    ev.preventDefault();
+    try {
+      window.top.location.href = url;
+    } catch (e) {
+      window.open(url, '_blank', 'noopener');
+    }
+  }, true);
+})();
+</script>
+"""
+
 PAGE = """<!doctype html>
 <html lang="pl">
 <head>
@@ -83,6 +122,7 @@ PAGE = """<!doctype html>
     <code>/api/breaking</code> <code>/api/feeds</code>
     <code>/api/status</code> <code>/api/refresh</code> (POST)
   </section>
+  @@LINKS_JS@@
 </body>
 </html>
 """
@@ -244,6 +284,7 @@ BREAKING_PAGE = """<!doctype html>
   apply();
 })();
 </script>
+@@LINKS_JS@@
 </body>
 </html>
 """
@@ -389,6 +430,7 @@ def render_page(snap: dict) -> str:
     page = page.replace("@@BREAKING@@", breaking_html)
     page = page.replace("@@FEEDS@@", feeds_html)
     page = page.replace("@@SOURCES@@", sources_html)
+    page = page.replace("@@LINKS_JS@@", COMPANION_LINKS_JS)
     return page
 
 
@@ -404,6 +446,7 @@ def render_breaking(snap: dict) -> str:
     page = page.replace("@@STAMP_CLASS@@", "stale " if stale else "")
     page = page.replace("@@BODY@@", items)
     page = page.replace("@@EMPTY_STYLE@@", "" if not breaking else "none")
+    page = page.replace("@@LINKS_JS@@", COMPANION_LINKS_JS)
     return page
 
 
